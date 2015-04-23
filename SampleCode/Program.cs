@@ -19,8 +19,7 @@ namespace SampleCode
             #region Setup Clients
 
             // setup service information client from service reference generated code
-            var svcClient = new CWSServiceInformationClient(new BasicHttpsBinding(),
-                new EndpointAddress("https://api.cert.nabcommerce.com/2.0.18/SvcInfo"));
+            var svcClient = new CWSServiceInformationClient();
 
             // setup transaction client from service reference generated code
             var txnClient = new CwsTransactionProcessingClient(new BasicHttpsBinding(),
@@ -83,8 +82,9 @@ namespace SampleCode
             #region GetServiceInformation
 
             ServiceInformation serviceInfo = svcClient.GetServiceInformation(sessionToken);
+            string serviceId = "";
 
-            bool imageTransactions = false;
+            bool imageTransactions = true;
             if (serviceInfo.ElectronicCheckingServices.Count() > 0)
             {
                 if (serviceInfo.ElectronicCheckingServices.First().ServiceName.Contains("GETI"))
@@ -101,9 +101,9 @@ namespace SampleCode
                 BankcardService service = serviceInfo.BankcardServices.First();
                 //// the serviceId represents the payment processor (global, firstdata, chase, etc.)
                 serviceId = service.ServiceId;
-            // if Capture is supported, the service is host capture
+                // if Capture is supported, the service is host capture
                 serviceIsHostCapture = service.Operations.Capture;
-            // if CaptureAll is supprted, the service is terminal capture
+                // if CaptureAll is supprted, the service is terminal capture
                 serviceIsTermCapture = service.Operations.CaptureAll;
             }
             #endregion
@@ -162,33 +162,33 @@ namespace SampleCode
 
             #region Transacting
 
-            if (imageTransactions)
+            if (serviceInfo.ElectronicCheckingServices.Count() > 0)
             {
                 string filePathName = @"..\..\..\tifBackSample.tif";
                 byte[] rawImgData = File.ReadAllBytes(filePathName);
-                char[] base64CharData = new char[GetB64Len(rawImgData.Length)];
+                char[] base64CharData = new char[getB64Length(rawImgData.Length)];
                 Convert.ToBase64CharArray(rawImgData, 0, rawImgData.Length, base64CharData, 0);
                 byte[] backImageData = Encoding.ASCII.GetBytes(base64CharData);
 
                 filePathName = @"..\..\..\tifFrontSample.tif";
                 rawImgData = File.ReadAllBytes(filePathName);
-                base64CharData = new char[GetB64Len(rawImgData.Length)];
+                base64CharData = new char[getB64Length(rawImgData.Length)];
                 Convert.ToBase64CharArray(rawImgData, 0, rawImgData.Length, base64CharData, 0);
                 byte[] frontImageData = Encoding.ASCII.GetBytes(base64CharData);
 
-                ElectronicCheckingTransaction debitRequest = new ElectronicCheckingTransaction
+                var debitRequest = new ElectronicCheckingTransaction
                 {
                     CustomerData = new ElectronicCheckingCustomerData()
                     {
                         BillingData = new CustomerInfo()
                         {
-                            Address = new AddressInfo()
+                            Address = new NabVelocity.Txn.AddressInfo()
                             {
                                 Street1 = "123 N Central",
                                 City = "Thornton",
                                 PostalCode = "12345",
                                 StateProvince = "CO",
-                                CountryCode = TypeISOCountryCodeA3.USA
+                                CountryCode = NabVelocity.Txn.TypeISOCountryCodeA3.USA
                             },
                             Name = new NameInfo
                             {
@@ -237,7 +237,7 @@ namespace SampleCode
                         Amount = 25.00m,
                         SECCode = SECCode.POP,
                         TransactionType = TransactionType.Debit,
-                        CurrencyCode = TypeISOCurrencyCodeA3.USD,
+                        CurrencyCode = NabVelocity.Txn.TypeISOCurrencyCodeA3.USD,
                         EffectiveDate = DateTime.Now,
                         IsRecurring = false,
                         PayeeId = "Some Data",
@@ -250,7 +250,7 @@ namespace SampleCode
                 {
                     var debitResponse =
                         (ElectronicCheckingTransactionResponse)
-                            txnClient.Authorize(sessionToken, debitRequest, appId, mercProfileId, serviceId);
+                            txnClient.Authorize(sessionToken, debitRequest, applicationProfileId, merchantProfileId, serviceId);
 
                     Console.WriteLine("(Debit) Status: " + debitResponse.Status + "\r\n");
                 }
@@ -831,6 +831,37 @@ namespace SampleCode
             }
 
             #endregion
+
+            #region Querying for Transactions
+
+            var tmsClient = new NabVelocity.Tms.TMSOperationsClient();
+
+            var queryParams = new NabVelocity.Tms.QueryTransactionsParameters()
+            {
+                Amounts = new[] { 16.00M },
+                CardTypes = new[] { NabVelocity.Tms.TypeCardType.Visa },
+                CaptureStates = new[] { NabVelocity.Tms.CaptureState.Captured },
+                MerchantProfileIds = new[] { "My Test App" },
+                TransactionDateRange = new NabVelocity.Tms.DateRange() { StartDateTime = DateTime.Now.AddDays(-2), EndDateTime = DateTime.Now },
+                TransactionClassTypePairs = new[] { 
+                    new NabVelocity.Tms.TransactionClassTypePair() { TransactionClass = "BCP", TransactionType = "AUTH" } 
+                },
+            };
+
+            var pagingParams = new NabVelocity.Tms.PagingParameters() { Page = 0, PageSize = 10 };
+
+            var txnsSummary = tmsClient.QueryTransactionsSummary(sessionToken, queryParams, false, pagingParams);
+
+            var txnsDetail = tmsClient.QueryTransactionsDetail(sessionToken, queryParams, NabVelocity.Tms.TransactionDetailFormat.CWSTransaction, false, pagingParams);
+
+            var txnsFamilies = tmsClient.QueryTransactionFamilies(sessionToken, queryParams, pagingParams);
+
+            #endregion
+        }
+
+        private static int getB64Length(int originalSizeInBytes)
+        {
+            return 4*(int) Math.Ceiling(originalSizeInBytes/3.0);
         }
     }
 }
